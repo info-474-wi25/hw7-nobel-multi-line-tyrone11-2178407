@@ -31,10 +31,30 @@ d3.csv("nobel_laureates.csv").then(data => {
     // --- STUDENTS START HERE ---
     // 3: PREPARE DATA
     // 3.a: Categorize data into STEM and Non-STEM
+
+const stemCategories = ["chemistry", "physics", "medicine"];
+
+const categorizedData = data.map(d => ({
+    ...d,
+    categoryGroup: stemCategories.includes(d.category.trim().toLowerCase()) ? "STEM" : "Non-STEM"
+}));
+
+
+
     // Example: Group "physics" into STEM, "literature" into Non-STEM
 
     // 3.b: Group data by categoryGroup and year, and count entries
     // Use d3.rollup to create a nested data structure
+const categories = d3.rollup(
+  categorizedData,
+  v => d3.rollup(
+    v,
+    values => values.length,
+    d => d.year
+  ),
+  d => d.categoryGroup
+);
+
 
     // Check your work:
     // console.log("Categories:", ...);
@@ -44,10 +64,46 @@ d3.csv("nobel_laureates.csv").then(data => {
     // 4.b: Define yScale based on the max count of laureates
     // 4.c: Define colorScale using d3.scaleOrdinal with categories as the domain
 
+    const allYears = Array.from(categories.values()).flatMap(yearMap => Array.from(yearMap.keys()));
+    const xScale = d3.scaleLinear()
+        .domain(d3.extent(allYears))
+        .range([0, width]);
+
+    const yearCounts = Array.from(categories.values()).map(yearMap => Array.from(yearMap.values()));
+    const maxCount = d3.max(yearCounts, yearValues => d3.max(yearValues));
+    const yScale = d3.scaleLinear()
+        .domain([0, 10])
+        .range([height, 0]);
+
+    const colorScale = d3.scaleOrdinal()
+        .domain(Array.from(categories.keys()))
+        .range(d3.schemeCategory10);
+
     // 5: PLOT LINES
     // 5.a: CREATE PATH
     // - Use d3.line() to generate paths from grouped data.
     // - Convert the nested data structure into an array of objects containing x (year) and y (count).
+
+    const line = d3.line()
+        .x(d => xScale(d.year))
+        .y(d => yScale(d.count));
+
+    const dataArray = Array.from(categories.entries());
+
+    svgLine.selectAll("path")
+        .data(dataArray)
+        .enter()
+        .append("path")
+        .attr("d", d => {
+            const yearMap = d[1];
+            const values = Array.from(yearMap.entries()).map(([year, count]) => ({ year, count }));
+            return line(values);
+        })
+        .attr("class", "line")
+        .style("stroke", d => colorScale(d[0]))
+        .style("fill", "none")
+        .style("stroke-width", 2);
+
 
     // 5.b: PLOT LINE
     // - Bind data to <path> elements and use the "d" attribute to draw lines.
@@ -62,11 +118,46 @@ d3.csv("nobel_laureates.csv").then(data => {
     // - Use d3.axisBottom(xScale) to create the x-axis.
     // - Append it to the bottom of the SVG.
 
+    svgLine.append("g")
+    .attr("transform", `translate(0,${height})`)
+    .call(d3.axisBottom(xScale).tickFormat(d3.format("d")));
+
+    svgLine.append("g")
+        .call(d3.axisLeft(yScale));
+
+
     // 6.b: Y-AXIS
     // - Use d3.axisLeft(yScale) to create the y-axis.
     // - Append it to the left of the SVG.
 
     // 7: ADD LABELS
+
+        // Title
+    svgLine.append("text")
+        .attr("class", "title")
+        .attr("x", width / 2)
+        .attr("y", -margin.top / 2)
+        .attr("text-anchor", "middle")
+        .text("STEM vs Non-STEM Nobel Laureates Over Time");
+
+    // X-axis label
+   svgLine.append("text")
+    .attr("class", "axis-label")
+    .attr("x", width / 2)
+    .attr("y", height + 40)  // More precise vertical position
+    .attr("text-anchor", "middle")
+    .style("font-size", "14px")
+    .style("fill", "#444")
+    .text("Year");
+    // Y-axis label
+    svgLine.append("text")
+        .attr("class", "axis-label")
+        .attr("transform", "rotate(-90)")
+        .attr("x", -height / 2)
+        .attr("y", -margin.left / 2)
+        .attr("text-anchor", "middle")
+        .text("Number of Laureates");
+
     // 7.a: Title
     // - Add a text element above the chart for the chart title.
 
@@ -77,6 +168,29 @@ d3.csv("nobel_laureates.csv").then(data => {
     // - Add a rotated text element beside the y-axis to describe it (e.g., "Number of Laureates").
 
     // 8: LEGEND
+const legend = svgLine.selectAll(".legend")
+    .data(dataArray)
+    .enter()
+    .append("g")
+    .attr("class", "legend")
+    .attr("transform", (d, i) => `translate(${width - 150}, ${-margin.top / 2 + i * 30})`);
+
+legend.append("rect")
+    .attr("x", 0)
+    .attr("width", 12)
+    .attr("height", 12)
+    .style("fill", d => colorScale(d[0]));
+
+legend.append("text")
+    .attr("x", 20)
+    .attr("y", 10)
+    .attr("text-anchor", "start")
+    .style("alignment-baseline", "middle")
+    .style("font-size", "12px")
+    .text(d => d[0]);
+
+
+        
     // 8.a: CREATE AND POSITION SHAPE
     // - Use <g> elements to create groups for each legend item.
     // - Position each legend group horizontally or vertically.
