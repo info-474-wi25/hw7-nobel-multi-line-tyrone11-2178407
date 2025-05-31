@@ -1,9 +1,7 @@
-// 1: SET GLOBAL VARIABLES
-const margin = { top: 50, right: 30, bottom: 60, left: 70 };
-const width = 800 - margin.left - margin.right;
-const height = 400 - margin.top - margin.bottom;
+const margin = { top: 50, right: 30, bottom: 60, left: 70 },
+      width = 750 - margin.left - margin.right,
+      height = 400 - margin.top - margin.bottom;
 
-// Create the SVG container and group element for the chart
 const svgLine = d3.select("#lineChart")
     .append("svg")
     .attr("width", width + margin.left + margin.right)
@@ -11,195 +9,129 @@ const svgLine = d3.select("#lineChart")
     .append("g")
     .attr("transform", `translate(${margin.left},${margin.top})`);
 
-// 2: LOAD DATA
 d3.csv("nobel_laureates.csv").then(data => {
-    // Relevant columns:
-    // - fullname -> name (y variable)
-    // - year (x variable)
-    // - category (color variable)
-
-    // 2.a: REFORMAT DATA
+    const stemCategories = ["chemistry", "physics", "medicine"];
     data.forEach(d => {
-        d.year = +d.year;       // Convert year to a number
-        d.name = d.fullname;    // Rename column for clarity
+        d.year = +d.year;
+        d.name = d.fullname;
+        d.categoryGroup = stemCategories.includes(d.category.toLowerCase()) ? "STEM" : "Non-STEM";
     });
 
-    // Check your work:
-    // console.log("Raw data:", data);
-    // console.log("Years:", data.map(d => d.year));
+    const categories = d3.rollup(data,
+        v => d3.rollup(v, v2 => v2.length, d => d.year),
+        d => d.categoryGroup
+    );
 
-    // --- STUDENTS START HERE ---
-    // 3: PREPARE DATA
-    // 3.a: Categorize data into STEM and Non-STEM
+    const flattenedData = [];
+    categories.forEach((yearMap, category) => {
+        yearMap.forEach((count, year) => {
+            flattenedData.push({ year, count, category });
+        });
+    });
 
-const stemCategories = ["chemistry", "physics", "medicine"];
-
-const categorizedData = data.map(d => ({
-    ...d,
-    categoryGroup: stemCategories.includes(d.category.trim().toLowerCase()) ? "STEM" : "Non-STEM"
-}));
-
-
-
-    // Example: Group "physics" into STEM, "literature" into Non-STEM
-
-    // 3.b: Group data by categoryGroup and year, and count entries
-    // Use d3.rollup to create a nested data structure
-const categories = d3.rollup(
-  categorizedData,
-  v => d3.rollup(
-    v,
-    values => values.length,
-    d => d.year
-  ),
-  d => d.categoryGroup
-);
-
-
-    // Check your work:
-    // console.log("Categories:", ...);
-
-    // 4: SET SCALES
-    // 4.a: Define xScale for years using d3.scaleLinear
-    // 4.b: Define yScale based on the max count of laureates
-    // 4.c: Define colorScale using d3.scaleOrdinal with categories as the domain
-
-    const allYears = Array.from(categories.values()).flatMap(yearMap => Array.from(yearMap.keys()));
     const xScale = d3.scaleLinear()
-        .domain(d3.extent(allYears))
+        .domain(d3.extent(flattenedData, d => d.year))
         .range([0, width]);
 
-    const yearCounts = Array.from(categories.values()).map(yearMap => Array.from(yearMap.values()));
-    const maxCount = d3.max(yearCounts, yearValues => d3.max(yearValues));
     const yScale = d3.scaleLinear()
-        .domain([0, 10])
+        .domain([0, d3.max(flattenedData, d => d.count) + 1])
         .range([height, 0]);
-
-    const colorScale = d3.scaleOrdinal()
-        .domain(Array.from(categories.keys()))
-        .range(d3.schemeCategory10);
-
-    // 5: PLOT LINES
-    // 5.a: CREATE PATH
-    // - Use d3.line() to generate paths from grouped data.
-    // - Convert the nested data structure into an array of objects containing x (year) and y (count).
 
     const line = d3.line()
         .x(d => xScale(d.year))
         .y(d => yScale(d.count));
 
-    const dataArray = Array.from(categories.entries());
+    function linearRegression(data) {
+        const n = data.length;
+        const sumX = d3.sum(data, d => d.year);
+        const sumY = d3.sum(data, d => d.count);
+        const sumXY = d3.sum(data, d => d.year * d.count);
+        const sumX2 = d3.sum(data, d => d.year * d.year);
 
-    svgLine.selectAll("path")
-        .data(dataArray)
-        .enter()
-        .append("path")
-        .attr("d", d => {
-            const yearMap = d[1];
-            const values = Array.from(yearMap.entries()).map(([year, count]) => ({ year, count }));
-            return line(values);
-        })
-        .attr("class", "line")
-        .style("stroke", d => colorScale(d[0]))
-        .style("fill", "none")
-        .style("stroke-width", 2);
+        const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+        const intercept = (sumY - slope * sumX) / n;
 
+        const [xMin, xMax] = d3.extent(data, d => d.year);
+        return [
+            { year: xMin, count: slope * xMin + intercept },
+            { year: xMax, count: slope * xMax + intercept }
+        ];
+    }
 
-    // 5.b: PLOT LINE
-    // - Bind data to <path> elements and use the "d" attribute to draw lines.
-    // - Add a "class" to each line for styling.
+    function drawTrendline(category) {
+        const filtered = flattenedData.filter(d => d.category === category);
+        const trend = linearRegression(filtered);
 
-    // 5.c: ADD STYLE
-    // - Use the colorScale to set the "stroke" attribute for each line.
-    // - Add stroke-width and optional hover effects.
+        svgLine.append("path")
+            .datum(trend)
+            .attr("class", "trendline")
+            .attr("d", d3.line()
+                .x(d => xScale(d.year))
+                .y(d => yScale(d.count)))
+            .style("stroke", "gray")
+            .style("stroke-dasharray", "4 2")
+            .style("fill", "none")
+            .style("stroke-width", 2);
+    }
 
-    // 6: ADD AXES
-    // 6.a: X-AXIS
-    // - Use d3.axisBottom(xScale) to create the x-axis.
-    // - Append it to the bottom of the SVG.
+    function updateChart(category) {
+        const filtered = flattenedData.filter(d => d.category === category);
+
+        svgLine.selectAll("path.data-line").remove();
+        svgLine.selectAll(".trendline").remove();
+
+        svgLine.selectAll("path.data-line")
+            .data([filtered])
+            .enter()
+            .append("path")
+            .attr("class", "data-line")
+            .attr("d", line)
+            .style("stroke", category === "STEM" ? "#007BFF" : "#F39C12")
+            .style("fill", "none")
+            .style("stroke-width", 2);
+
+        if (d3.select("#trendline-toggle").property("checked")) {
+            drawTrendline(category);
+        }
+    }
 
     svgLine.append("g")
-    .attr("transform", `translate(0,${height})`)
-    .call(d3.axisBottom(xScale).tickFormat(d3.format("d")));
+        .attr("transform", `translate(0,${height})`)
+        .call(d3.axisBottom(xScale).tickFormat(d3.format("d")));
 
-    svgLine.append("g")
-        .call(d3.axisLeft(yScale));
+    svgLine.append("g").call(d3.axisLeft(yScale));
 
-
-    // 6.b: Y-AXIS
-    // - Use d3.axisLeft(yScale) to create the y-axis.
-    // - Append it to the left of the SVG.
-
-    // 7: ADD LABELS
-
-        // Title
     svgLine.append("text")
         .attr("class", "title")
         .attr("x", width / 2)
-        .attr("y", -margin.top / 2)
+        .attr("y", -20)
         .attr("text-anchor", "middle")
-        .text("STEM vs Non-STEM Nobel Laureates Over Time");
+        .text("Nobel Laureates Trends");
 
-    // X-axis label
-   svgLine.append("text")
-    .attr("class", "axis-label")
-    .attr("x", width / 2)
-    .attr("y", height + 40)  // More precise vertical position
-    .attr("text-anchor", "middle")
-    .style("font-size", "14px")
-    .style("fill", "#444")
-    .text("Year");
-    // Y-axis label
+    svgLine.append("text")
+        .attr("class", "axis-label")
+        .attr("x", width / 2)
+        .attr("y", height + 40)
+        .attr("text-anchor", "middle")
+        .text("Year");
+
     svgLine.append("text")
         .attr("class", "axis-label")
         .attr("transform", "rotate(-90)")
         .attr("x", -height / 2)
-        .attr("y", -margin.left / 2)
+        .attr("y", -45)
         .attr("text-anchor", "middle")
         .text("Number of Laureates");
 
-    // 7.a: Title
-    // - Add a text element above the chart for the chart title.
+    updateChart("STEM");
 
-    // 7.b: X-axis label
-    // - Add a text element below the x-axis to describe it (e.g., "Year").
+    d3.select("#categorySelect").on("change", function () {
+        const selected = d3.select(this).property("value");
+        updateChart(selected);
+    });
 
-    // 7.c: Y-axis label
-    // - Add a rotated text element beside the y-axis to describe it (e.g., "Number of Laureates").
-
-    // 8: LEGEND
-const legend = svgLine.selectAll(".legend")
-    .data(dataArray)
-    .enter()
-    .append("g")
-    .attr("class", "legend")
-    .attr("transform", (d, i) => `translate(${width - 150}, ${-margin.top / 2 + i * 30})`);
-
-legend.append("rect")
-    .attr("x", 0)
-    .attr("width", 12)
-    .attr("height", 12)
-    .style("fill", d => colorScale(d[0]));
-
-legend.append("text")
-    .attr("x", 20)
-    .attr("y", 10)
-    .attr("text-anchor", "start")
-    .style("alignment-baseline", "middle")
-    .style("font-size", "12px")
-    .text(d => d[0]);
-
-
-        
-    // 8.a: CREATE AND POSITION SHAPE
-    // - Use <g> elements to create groups for each legend item.
-    // - Position each legend group horizontally or vertically.
-
-    // 8.b: ADD COLOR SQUARES
-    // - Append <rect> elements to the legend groups.
-    // - Use colorScale to set the "fill" attribute for each square.
-
-    // 8.c: ADD TEXT
-    // - Append <text> elements to the legend groups.
-    // - Position and align the text beside each color square.
+    d3.select("#trendline-toggle").on("change", function () {
+        const selected = d3.select("#categorySelect").property("value");
+        updateChart(selected);
+    });
 });
